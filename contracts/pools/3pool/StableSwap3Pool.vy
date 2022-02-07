@@ -1,4 +1,4 @@
-# @version 0.2.4
+# @version 0.2.8
 # (c) Curve.Fi, 2020
 # Pool for DAI/USDC/USDT
 
@@ -70,6 +70,25 @@ event RampA:
 event StopRampA:
     A: uint256
     t: uint256
+
+# My test custom logs 
+event LiquidityLog:
+    D0: uint256
+    D1: uint256
+    new_balances: uint256[N_COINS]    
+
+event GetDLog:
+    _xp: uint256[N_COINS]      
+    S: uint256
+
+event XPLog:
+    i: uint256
+    rates_i: uint256    
+    balances_i: uint256
+    precision: uint256
+
+event XPLogRates:
+    rates: uint256[N_COINS]
 
 
 # This can (and needs to) be changed at compile time
@@ -189,6 +208,16 @@ def _xp_mem(_balances: uint256[N_COINS]) -> uint256[N_COINS]:
         result[i] = result[i] * _balances[i] / PRECISION
     return result
 
+@internal
+def _xp_mem_gw(_balances: uint256[N_COINS]) -> uint256[N_COINS]:
+    result: uint256[N_COINS] = RATES
+    log XPLogRates(RATES)
+    log XPLogRates(result)
+    for i in range(N_COINS):
+        log XPLog(i, result[i], _balances[i], PRECISION)
+        result[i] = result[i] * _balances[i] / PRECISION
+    return result
+
 
 @pure
 @internal
@@ -215,13 +244,51 @@ def get_D(xp: uint256[N_COINS], amp: uint256) -> uint256:
         else:
             if Dprev - D <= 1:
                 break
-    return D
+    return D  
+
+@internal
+def get_D_gw(xp: uint256[N_COINS], amp: uint256) -> uint256:
+    S: uint256 = 0
+    for _x in xp:
+        S += _x
+    if S == 0:
+        return 0
+
+    log GetDLog(xp, S)    
+
+    Dprev: uint256 = 0
+    D: uint256 = S
+    Ann: uint256 = amp * N_COINS
+    for _i in range(255):
+        D_P: uint256 = D
+        for _x in xp:
+            D_P = D_P * D / (_x * N_COINS)  # If division by 0, this will be borked: only withdrawal will work. And that is good
+        Dprev = D
+        D = (Ann * S + D_P * N_COINS) * D / ((Ann - 1) * D + (N_COINS + 1) * D_P)
+        # Equality with the precision of 1
+        if D > Dprev:
+            if D - Dprev <= 1:
+                break
+        else:
+            if Dprev - D <= 1:
+                break
+    return D  
 
 
 @view
 @internal
 def get_D_mem(_balances: uint256[N_COINS], amp: uint256) -> uint256:
     return self.get_D(self._xp_mem(_balances), amp)
+
+@view
+@external
+def get_D_mem_gw(_balances: uint256[N_COINS], amp: uint256) -> uint256:
+    return self.get_D(self._xp_mem(_balances), amp)    
+
+
+@external
+def get_D_mem_gw_trans(_balances: uint256[N_COINS], amp: uint256) -> uint256:
+    return self.get_D_gw(self._xp_mem_gw(_balances), amp)    
 
 
 @view
@@ -263,6 +330,97 @@ def calc_token_amount(amounts: uint256[N_COINS], deposit: bool) -> uint256:
     else:
         diff = D0 - D1
     return diff * token_amount / D0
+
+
+@view
+@external
+def self_test() -> bytes32:
+    c: bytes32 = convert(self, bytes32)
+    return c
+
+@view
+@external
+def self_test_2() -> bytes32:
+    c: bytes32 = convert(msg.sender, bytes32)
+    return c
+
+@view
+@external
+def msg_sender() -> address:
+    return msg.sender
+
+@external
+def msg_sender_trans() -> address:
+    return msg.sender   
+
+
+@external
+@nonreentrant('lock') 
+def transfer_test(amount: uint256, i: uint256):
+    in_coin: address = self.coins[i]
+    # "safeTransferFrom" which works for ERC20s which return bool or not
+    _response: Bytes[32] = raw_call(
+        in_coin,
+        concat(
+            method_id("transferFrom(address,address,uint256)"),
+            convert(msg.sender, bytes32),
+            convert(self, bytes32),
+            convert(amount, bytes32),
+        ),
+        max_outsize=32,
+    )       
+
+@external
+@nonreentrant('lock')
+def add_liquidity_v1(amounts: uint256[N_COINS], min_mint_amount: uint256):
+    assert not self.is_killed  # dev: is killed
+
+    fees: uint256[N_COINS] = empty(uint256[N_COINS])
+    _fee: uint256 = self.fee * N_COINS / (4 * (N_COINS - 1))
+    _admin_fee: uint256 = self.admin_fee
+    amp: uint256 = self._A()
+
+    token_supply: uint256 = self.token.totalSupply()
+    # Initial invariant
+    D0: uint256 = 0
+    old_balances: uint256[N_COINS] = self.balances
+    if token_supply > 0:
+        D0 = self.get_D_mem(old_balances, amp)
+    new_balances: uint256[N_COINS] = old_balances
+
+    for i in range(N_COINS):
+        in_amount: uint256 = amounts[i]
+        if token_supply == 0:
+            assert in_amount > 0  # dev: initial deposit requires all coins
+        in_coin: address = self.coins[i]
+
+        # Take coins from the sender
+        if in_amount > 0:
+            if i == FEE_INDEX:
+                in_amount = ERC20(in_coin).balanceOf(self)
+
+            # "safeTransferFrom" which works for ERC20s which return bool or not
+            _response: Bytes[32] = raw_call(
+                in_coin,
+                concat(
+                    method_id("transferFrom(address,address,uint256)"),
+                    convert(msg.sender, bytes32),
+                    convert(self, bytes32),
+                    convert(amounts[i], bytes32),
+                ),
+                max_outsize=32,
+            )  # dev: failed transfer
+            if len(_response) > 0:
+                assert convert(_response, bool)  # dev: failed transfer
+
+            if i == FEE_INDEX:
+                in_amount = ERC20(in_coin).balanceOf(self) - in_amount
+
+        new_balances[i] = old_balances[i] + in_amount
+
+    # Invariant after change
+    D1: uint256 = self.get_D_mem(new_balances, amp)
+    log LiquidityLog(D0, D1, new_balances)
 
 
 @external
@@ -316,6 +474,7 @@ def add_liquidity(amounts: uint256[N_COINS], min_mint_amount: uint256):
     # Invariant after change
     D1: uint256 = self.get_D_mem(new_balances, amp)
     assert D1 > D0
+    log LiquidityLog(D0, D1, new_balances)
 
     # We need to recalculate the invariant accounting for fees
     # to calculate fair user's share
@@ -335,6 +494,8 @@ def add_liquidity(amounts: uint256[N_COINS], min_mint_amount: uint256):
         D2 = self.get_D_mem(new_balances, amp)
     else:
         self.balances = new_balances
+
+    log LiquidityLog(D1, D2, new_balances)    
 
     # Calculate, how much pool tokens to mint
     mint_amount: uint256 = 0

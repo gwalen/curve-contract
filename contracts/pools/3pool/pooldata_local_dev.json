@@ -17,20 +17,20 @@
             "name": "DAI",
             "decimals": 18,
             "tethered": false,
-            "underlying_address": "0xF86176aF4687a9E65177913Ebe0A333D79E19fF4"
+            "underlying_address": "0x5FbDB2315678afecb367f032d93F642f64180aa3"
         },
         {
             "name": "USDC",
             "decimals": 6,
             "tethered": false,
-            "underlying_address": "0x28D0C916Df5bDBB6636b90E25A97363d009eF7e0"
+            "underlying_address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
 
         },
         {
             "name": "USDT",
             "decimals": 6,
             "tethered": true,
-            "underlying_address": "0x9BcB3F98236eE1eFB9455637Fa69E2BE27963725"
+            "underlying_address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
         }
     ]
 }
