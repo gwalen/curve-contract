@@ -6,18 +6,25 @@ from brownie.project import load as load_project
 from brownie.project.main import get_loaded_projects
 
 # set a throwaway admin account here
-DEPLOYER = accounts.add()
+# DEPLOYER = accounts.add()
+# DEPLOYER = accounts[0]             # local network
+# ADMIN = accounts[0] # local network
+ADMIN = accounts.load("gw_test_acc") # rinkeby
+DEPLOYER = ADMIN
 REQUIRED_CONFIRMATIONS = 1
 
 # deployment settings
 # most settings are taken from `contracts/pools/{POOL_NAME}/pooldata.json`
-POOL_NAME = ""
+POOL_NAME = "3pool"
 
 # temporary owner address
-POOL_OWNER = "0xedf2c58e16cc606da1977e79e1e69e79c54fe242"
-GAUGE_OWNER = "0xedf2c58e16cc606da1977e79e1e69e79c54fe242"
+# POOL_OWNER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # accounts[0]
+POOL_OWNER = ADMIN
+# GAUGE_OWNER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" # accounts[0]
+GAUGE_OWNER = ADMIN 
 
-MINTER = "0xd061D61a4d941c39E5453435B6345Dc261C2fcE0"
+# MINTER = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318" # local network
+MINTER = "0x209d2b2e6F5EA6f9A6392E9e84C3bDde56E4D803"   # rinkeby
 
 # POOL_OWNER = "0xeCb456EA5365865EbAb8a2661B0c503410e9B347"  # PoolProxy
 # GAUGE_OWNER = "0x519AFB566c05E00cfB9af73496D00217A630e4D5"  # GaugeProxy
@@ -27,7 +34,7 @@ def _tx_params():
     return {
         "from": DEPLOYER,
         "required_confs": REQUIRED_CONFIRMATIONS,
-        "gas_price": GasNowScalingStrategy("standard", "fast"),
+        "priority_fee": "3 gwei" # use on Rinkeby (EIP-1559) not tested on local dev
     }
 
 
@@ -55,7 +62,15 @@ def main():
 
     # deploy the token
     token_args = pool_data["lp_constructor"]
-    token = token_deployer.deploy(token_args["name"], token_args["symbol"], _tx_params())
+    # token = token_deployer.deploy(token_args["name"], token_args["symbol"], _tx_params()) # TODO: report error on github - wrong number of arguments in constructor
+    
+    tokenInitialSupply = 30000 # 30 000
+
+    token = token_deployer.deploy(token_args["name"], token_args["symbol"], 18, tokenInitialSupply, {
+        "from": DEPLOYER,
+        "required_confs": REQUIRED_CONFIRMATIONS
+        # "gas_price": GasNowScalingStrategy("standard", "fast"), # this does not compile : ValueError: Expecting value: line 1 column 1 (char 0)
+    })
 
     # deploy the pool
     abi = next(i["inputs"] for i in swap_deployer.abi if i["type"] == "constructor")
